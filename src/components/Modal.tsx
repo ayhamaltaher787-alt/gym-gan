@@ -26,28 +26,28 @@ export function Modal({ open, onClose, children, labelledBy }: Props) {
     <AnimatePresence>
       {open && (
         <motion.div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          key="modal-root"
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
+          transition={{ duration: 0.15 }}
           role="dialog"
           aria-modal="true"
           aria-labelledby={labelledBy}
         >
           <div
-            className="absolute inset-0 bg-ink-900/70 backdrop-blur-md"
+            className="absolute inset-0 bg-black/75 backdrop-blur-md"
             onClick={onClose}
             aria-hidden
           />
-          <motion.div
-            className="relative w-full max-w-2xl card p-6 sm:p-8"
-            initial={{ opacity: 0, scale: 0.95, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: 10 }}
-            transition={{ duration: 0.25, ease: "easeOut" }}
+          <div
+            className="relative w-full max-w-2xl rounded-3xl border border-white/10 shadow-2xl p-6 sm:p-8"
+            style={{ backgroundColor: "#151a29" }}
+            onClick={(e) => e.stopPropagation()}
           >
             {children}
-          </motion.div>
+          </div>
         </motion.div>
       )}
     </AnimatePresence>
