@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { Modal } from "./Modal";
 import type { ProgramItem } from "../store/programsStore";
 import { formatBytes } from "../lib/format";
 
@@ -9,27 +8,55 @@ interface Props {
 }
 
 /**
- * A safe, offline-friendly preview / launcher for uploaded Scratch projects.
- *
- * Directly running arbitrary .sb3 files inside our own React bundle would require
- * shipping the full Scratch VM (Node-oriented, large, unstable in Vite without
- * heavy shimming). Instead we:
- *
- *  1. Show a rich preview card with metadata + a big "▶" call to action.
- *  2. Offer "Datei herunterladen" (always works, even offline).
- *  3. Offer "In TurboWarp öffnen" – opens turbowarp.org in a new tab, where the
- *     user can drop the downloaded .sb3 to play it. TurboWarp is a well-known,
- *     browser-based Scratch player; if you're online during the presentation
- *     it's a one-click flow.
+ * Build the TurboWarp URL for a given publicly reachable .sb3 file.
+ * TurboWarp accepts an external `project_url` query parameter and loads the
+ * file directly – no manual upload, no download required.
+ */
+function turboWarpUrl(publicUrl: string, mode: "editor" | "fullscreen" | "embed" = "fullscreen") {
+  const base =
+    mode === "editor"
+      ? "https://turbowarp.org/editor"
+      : mode === "embed"
+      ? "https://turbowarp.org/embed"
+      : "https://turbowarp.org/fullscreen";
+  return `${base}?project_url=${encodeURIComponent(publicUrl)}`;
+}
+
+/**
+ * Runs Scratch (.sb3) programs directly:
+ *  - In-page via a TurboWarp iframe – you can just press ▶ and play.
+ *  - "Vollbild öffnen" opens the same project in a new tab using a stable
+ *    window name (`gymgan-play-<id>`), so subsequent clicks on the same
+ *    program focus the already-open tab instead of spawning duplicates.
+ *  - Non-.sb3 uploads (rare) fall back to a download-first flow.
  */
 export function ScratchPreview({ program }: Props) {
-  const [modal, setModal] = useState(false);
+  const [playing, setPlaying] = useState(false);
+
+  const file = program.file;
+  const publicUrl = file?.publicUrl;
+  const isScratch = !!publicUrl && /\.sb3$/i.test(file?.name ?? "");
+
+  const openFullscreen = () => {
+    if (!publicUrl) return;
+    const url = turboWarpUrl(publicUrl, "fullscreen");
+    // Stable window name → same program reuses its tab.
+    const winName = `gymgan-play-${program.id}`;
+    const w = window.open(url, winName);
+    if (w && !w.closed) {
+      try {
+        w.focus();
+      } catch {
+        // Some browsers block focus() – silent noop.
+      }
+    }
+  };
 
   const download = () => {
-    if (!program.file?.publicUrl) return;
+    if (!publicUrl) return;
     const a = document.createElement("a");
-    a.href = program.file.publicUrl;
-    a.download = program.file.name || `${program.title}.sb3`;
+    a.href = publicUrl;
+    a.download = file?.name || `${program.title}.sb3`;
     a.target = "_blank";
     a.rel = "noopener";
     document.body.appendChild(a);
@@ -37,109 +64,106 @@ export function ScratchPreview({ program }: Props) {
     a.remove();
   };
 
-  const canPlay = !!program.file?.publicUrl && /\.sb3$/i.test(program.file?.name ?? "");
-
-  return (
-    <>
-      <div className="relative rounded-3xl overflow-hidden border border-white/10 bg-gradient-to-br from-ink-800 via-ink-800 to-ink-700 shadow-card">
-        {program.thumbnail ? (
-          <img
-            src={program.thumbnail}
-            alt=""
-            className="absolute inset-0 h-full w-full object-cover opacity-70"
-          />
+  if (isScratch) {
+    return (
+      <div className="rounded-3xl overflow-hidden border border-white/10 bg-black shadow-card">
+        {playing ? (
+          <div className="relative aspect-[4/3] bg-black">
+            <iframe
+              title={program.title}
+              src={turboWarpUrl(publicUrl!, "embed")}
+              allowFullScreen
+              allow="autoplay; fullscreen; gamepad; microphone; camera"
+              className="absolute inset-0 h-full w-full border-0"
+            />
+          </div>
         ) : (
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(58,94,255,0.35),transparent_60%),radial-gradient(circle_at_70%_80%,rgba(255,154,26,0.25),transparent_60%)]" />
-        )}
-        <div className="relative aspect-video flex flex-col items-center justify-center gap-4 p-6">
-          <motion.button
-            type="button"
-            onClick={() => setModal(true)}
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.97 }}
-            className="h-20 w-20 rounded-full bg-white text-ink-900 flex items-center justify-center shadow-2xl"
-            aria-label="Programm starten"
-          >
-            <svg width="28" height="32" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-              <path d="M6 4l14 8-14 8V4z" />
-            </svg>
-          </motion.button>
-          <div className="text-center">
-            <div className="font-display text-lg text-white drop-shadow">
-              {program.title}
-            </div>
-            <div className="text-xs text-white/70">
-              {program.type === "scratch" ? "Scratch-Projekt" : "Programm"}
-              {program.file && ` · ${formatBytes(program.file.size)}`}
+          <div className="relative aspect-[4/3] bg-gradient-to-br from-ink-800 via-ink-800 to-ink-700">
+            {program.thumbnail && (
+              <img
+                src={program.thumbnail}
+                alt=""
+                className="absolute inset-0 h-full w-full object-cover opacity-60"
+              />
+            )}
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 p-6 text-center">
+              <motion.button
+                type="button"
+                onClick={() => setPlaying(true)}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.97 }}
+                className="h-20 w-20 rounded-full bg-white text-ink-900 flex items-center justify-center shadow-2xl"
+                aria-label="Programm starten"
+              >
+                <svg width="28" height="32" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                  <path d="M6 4l14 8-14 8V4z" />
+                </svg>
+              </motion.button>
+              <div>
+                <div className="font-display text-lg text-white drop-shadow">
+                  ▶ Direkt spielen
+                </div>
+                <div className="text-xs text-white/70">
+                  Scratch-Projekt · {file ? formatBytes(file.size) : ""}
+                </div>
+              </div>
             </div>
           </div>
-        </div>
-      </div>
-
-      <Modal open={modal} onClose={() => setModal(false)} labelledBy="play-title">
-        <div>
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <div className="text-xs uppercase tracking-[0.18em] text-ink-300">
-                Programm starten
-              </div>
-              <h2 id="play-title" className="font-display text-2xl text-white mt-0.5">
-                {program.title}
-              </h2>
-            </div>
+        )}
+        <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 bg-ink-900/80 border-t border-white/10">
+          <div className="text-xs text-ink-300 truncate">
+            {playing ? "Läuft in-app · gehostet über TurboWarp" : "Klick auf ▶ zum direkten Spielen"}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {playing && (
+              <button
+                type="button"
+                onClick={() => setPlaying(false)}
+                className="btn-ghost px-3 py-1.5 text-xs"
+              >
+                ◼ Anhalten
+              </button>
+            )}
             <button
               type="button"
-              onClick={() => setModal(false)}
-              className="btn-ghost px-2 py-1"
-              aria-label="Schließen"
+              onClick={openFullscreen}
+              className="btn-secondary px-3 py-1.5 text-xs"
+              title="Öffnet in neuem Tab; ist das Programm schon offen, wird der Tab wiederverwendet."
             >
-              ✕
+              ⛶ Vollbild
             </button>
-          </div>
-
-          <div className="mt-4 text-ink-200 text-sm">
-            {canPlay ? (
-              <>
-                <p>
-                  Dein Scratch-Projekt liegt fertig im Browser bereit. Für die volle Wiedergabe
-                  nutzt du am besten einen Scratch-Player wie <b>TurboWarp</b> – dort läuft die
-                  Datei direkt und ohne Installation.
-                </p>
-                <ol className="mt-3 list-decimal pl-5 space-y-1 text-ink-100">
-                  <li>Klicke auf „Datei herunterladen".</li>
-                  <li>Klicke auf „In TurboWarp öffnen".</li>
-                  <li>Ziehe die heruntergeladene Datei in TurboWarp – und los!</li>
-                </ol>
-              </>
-            ) : (
-              <p>
-                Für dieses Programm ist keine hochgeladene Datei vorhanden. Frage die
-                Programm-Autor:innen nach dem aktuellen Stand oder lade eine .sb3-Version über
-                „+ Programm hinzufügen" hoch.
-              </p>
-            )}
-          </div>
-
-          <div className="mt-6 grid gap-3 sm:grid-cols-2">
             <button
               type="button"
               onClick={download}
-              disabled={!canPlay}
-              className="btn-secondary px-5 py-3"
+              className="btn-ghost px-3 py-1.5 text-xs"
             >
-              ⬇️ Datei herunterladen
+              ⬇ Download
             </button>
-            <a
-              href="https://turbowarp.org/editor"
-              target="_blank"
-              rel="noreferrer noopener"
-              className="btn-primary px-5 py-3"
-            >
-              ▶ In TurboWarp öffnen
-            </a>
           </div>
         </div>
-      </Modal>
-    </>
+      </div>
+    );
+  }
+
+  // Fallback for uploads without a .sb3 (e.g. .zip / .html / no file at all).
+  return (
+    <div className="rounded-3xl border border-white/10 bg-ink-800 shadow-card p-8 text-center">
+      <div className="text-4xl mb-3">📦</div>
+      <div className="font-display text-lg text-white">{program.title}</div>
+      <p className="mt-2 text-sm text-ink-300">
+        {publicUrl
+          ? "Für dieses Programm ist kein direkter Scratch-Player verfügbar."
+          : "Für dieses Programm liegt (noch) keine Datei in der Cloud."}
+      </p>
+      {publicUrl && (
+        <button
+          type="button"
+          onClick={download}
+          className="btn-primary mt-5 px-5 py-3"
+        >
+          ⬇ Datei herunterladen
+        </button>
+      )}
+    </div>
   );
 }
