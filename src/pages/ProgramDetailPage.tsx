@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import { useProgramsStore } from "../store/programsStore";
 import { ScratchPreview } from "../components/ScratchPreview";
+import { DeleteWithCodeModal } from "../components/DeleteWithCodeModal";
 import { formatBytes, formatDate } from "../lib/format";
 
 const CATEGORY_LABEL: Record<string, string> = {
@@ -22,7 +23,7 @@ export function ProgramDetailPage() {
   const loading = useProgramsStore((s) => s.loading);
   const removeProgram = useProgramsStore((s) => s.removeProgram);
   const refresh = useProgramsStore((s) => s.refresh);
-  const [deleting, setDeleting] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   useEffect(() => {
     if (!loadedOnce && !loading) refresh();
@@ -49,16 +50,9 @@ export function ProgramDetailPage() {
     );
   }
 
-  const del = async () => {
-    if (!confirm(`„${program.title}“ wirklich entfernen?`)) return;
-    setDeleting(true);
-    try {
-      await removeProgram(program.id);
-      navigate("/programme");
-    } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : "Löschen fehlgeschlagen.");
-      setDeleting(false);
-    }
+  const confirmedDelete = async () => {
+    await removeProgram(program.id);
+    navigate("/programme");
   };
 
   return (
@@ -68,13 +62,19 @@ export function ProgramDetailPage() {
           ← Zurück zu Programme
         </Link>
         <button
-          onClick={del}
-          disabled={deleting}
+          onClick={() => setDeleteOpen(true)}
           className="btn-ghost px-3 py-2 text-sm text-rose-300 hover:text-rose-200"
         >
-          {deleting ? "Lösche…" : "🗑️ Entfernen"}
+          🗑️ Entfernen
         </button>
       </div>
+
+      <DeleteWithCodeModal
+        open={deleteOpen}
+        onClose={() => setDeleteOpen(false)}
+        itemName={program.title}
+        onConfirmed={confirmedDelete}
+      />
 
       <div className="grid gap-8 lg:grid-cols-[1.2fr_1fr] items-start">
         <motion.div
