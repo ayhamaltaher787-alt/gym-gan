@@ -8,39 +8,92 @@ interface Props {
 }
 
 /**
- * Build the TurboWarp URL for a given publicly reachable .sb3 file.
- * TurboWarp accepts an external `project_url` query parameter and loads the
- * file directly – no manual upload, no download required.
+ * Available Scratch players. Each entry knows how to build an embed URL and a
+ * fullscreen URL for a public .sb3 project URL. If a school firewall blocks
+ * one host (very often `turbowarp.org`), the user can switch to another one
+ * that runs on a different domain.
  */
-function turboWarpUrl(publicUrl: string, mode: "editor" | "fullscreen" | "embed" = "fullscreen") {
-  const base =
-    mode === "editor"
-      ? "https://turbowarp.org/editor"
-      : mode === "embed"
-      ? "https://turbowarp.org/embed"
-      : "https://turbowarp.org/fullscreen";
-  return `${base}?project_url=${encodeURIComponent(publicUrl)}`;
+interface PlayerDef {
+  key: "turbowarp" | "penguinmod";
+  label: string;
+  hint: string;
+  host: string;
+  embed: (publicUrl: string) => string;
+  fullscreen: (publicUrl: string) => string;
+}
+
+const PLAYERS: PlayerDef[] = [
+  {
+    key: "turbowarp",
+    label: "TurboWarp",
+    hint: "Standard-Player (turbowarp.org)",
+    host: "turbowarp.org",
+    embed: (u) => `https://turbowarp.org/embed?project_url=${encodeURIComponent(u)}`,
+    fullscreen: (u) => `https://turbowarp.org/fullscreen?project_url=${encodeURIComponent(u)}`,
+  },
+  {
+    key: "penguinmod",
+    label: "PenguinMod",
+    hint: "Alternative, falls TurboWarp im Netz blockiert ist (studio.penguinmod.com)",
+    host: "studio.penguinmod.com",
+    embed: (u) =>
+      `https://studio.penguinmod.com/PenguinMod.html?project_url=${encodeURIComponent(u)}`,
+    fullscreen: (u) =>
+      `https://studio.penguinmod.com/PenguinMod.html?project_url=${encodeURIComponent(u)}&fullscreen=true`,
+  },
+];
+
+const PLAYER_STORAGE_KEY = "gymgan:preferred-player";
+
+function loadPreferredPlayer(): PlayerDef {
+  try {
+    const saved = localStorage.getItem(PLAYER_STORAGE_KEY);
+    const found = PLAYERS.find((p) => p.key === saved);
+    if (found) return found;
+  } catch {
+    // ignore
+  }
+  return PLAYERS[0];
+}
+
+function savePreferredPlayer(p: PlayerDef) {
+  try {
+    localStorage.setItem(PLAYER_STORAGE_KEY, p.key);
+  } catch {
+    // ignore
+  }
 }
 
 /**
  * Runs Scratch (.sb3) programs directly:
- *  - In-page via a TurboWarp iframe – you can just press ▶ and play.
- *  - "Vollbild öffnen" opens the same project in a new tab using a stable
- *    window name (`gymgan-play-<id>`), so subsequent clicks on the same
- *    program focus the already-open tab instead of spawning duplicates.
- *  - Non-.sb3 uploads (rare) fall back to a download-first flow.
+ *  - Embeds the file into a live iframe (TurboWarp by default,
+ *    PenguinMod as a fallback for restricted networks).
+ *  - Fullscreen button opens the project in a new tab with a stable
+ *    window name (`gymgan-play-<id>`), so a second click focuses the
+ *    already-open tab instead of spawning a duplicate.
+ *  - The chosen player is remembered per browser (localStorage).
  */
 export function ScratchPreview({ program }: Props) {
+  const [player, setPlayer] = useState<PlayerDef>(loadPreferredPlayer);
   const [playing, setPlaying] = useState(false);
 
   const file = program.file;
   const publicUrl = file?.publicUrl;
   const isScratch = !!publicUrl && /\.sb3$/i.test(file?.name ?? "");
 
+  const switchPlayer = (p: PlayerDef) => {
+    setPlayer(p);
+    savePreferredPlayer(p);
+    // If we're already playing, restart with the new player.
+    if (playing) {
+      setPlaying(false);
+      setTimeout(() => setPlaying(true), 50);
+    }
+  };
+
   const openFullscreen = () => {
     if (!publicUrl) return;
-    const url = turboWarpUrl(publicUrl, "fullscreen");
-    // Stable window name → same program reuses its tab.
+    const url = player.fullscreen(publicUrl);
     const winName = `gymgan-play-${program.id}`;
     const w = window.open(url, winName);
     if (w && !w.closed) {
@@ -70,8 +123,9 @@ export function ScratchPreview({ program }: Props) {
         {playing ? (
           <div className="relative aspect-[4/3] bg-black">
             <iframe
+              key={player.key}
               title={program.title}
-              src={turboWarpUrl(publicUrl!, "embed")}
+              src={player.embed(publicUrl!)}
               allowFullScreen
               allow="autoplay; fullscreen; gamepad; microphone; camera"
               className="absolute inset-0 h-full w-full border-0"
@@ -111,8 +165,31 @@ export function ScratchPreview({ program }: Props) {
           </div>
         )}
         <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 bg-ink-900/80 border-t border-white/10">
-          <div className="text-xs text-ink-300 truncate">
-            {playing ? "Läuft in-app · gehostet über TurboWarp" : "Klick auf ▶ zum direkten Spielen"}
+          <div className="flex flex-wrap items-center gap-2 text-xs text-ink-300">
+            <span className="hidden sm:inline">Player:</span>
+            <div className="inline-flex rounded-lg border border-white/10 overflow-hidden">
+              {PLAYERS.map((p) => (
+                <button
+                  key={p.key}
+                  type="button"
+                  onClick={() => switchPlayer(p)}
+                  title={p.hint}
+                  className={
+                    "px-2.5 py-1 text-xs transition-colors " +
+                    (p.key === player.key
+                      ? "bg-brand-500/25 text-white"
+                      : "text-ink-200 hover:bg-white/5")
+                  }
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+            {playing && (
+              <span className="hidden md:inline text-[10px] text-ink-400">
+                lädt via {player.host}
+              </span>
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {playing && (
@@ -141,6 +218,14 @@ export function ScratchPreview({ program }: Props) {
             </button>
           </div>
         </div>
+        {playing && (
+          <div className="px-4 pb-3 -mt-1 text-[11px] text-ink-400">
+            Bleibt der Player leer? Schul-Netzwerk blockiert vielleicht{" "}
+            <b className="text-ink-200">{player.host}</b>. Wechsle oben auf einen
+            anderen Player oder nutze „⬇ Download" und öffne die Datei später
+            außerhalb der Schule.
+          </div>
+        )}
       </div>
     );
   }
